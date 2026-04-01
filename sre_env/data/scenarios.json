@@ -1,0 +1,688 @@
+{
+  "scenarios": [
+    {
+      "id": "easy_001",
+      "difficulty": "easy",
+      "name": "Database OOM Crash",
+      "description": "The database process ran out of memory and crashed. api-gateway throws 502s. Fix = restart database.",
+      "root_cause_service": "database",
+      "correct_fix_sequence": [
+        {
+          "tool": "restart",
+          "service": "database"
+        }
+      ],
+      "trap_actions": [
+        {
+          "action": {
+            "tool": "restart",
+            "service": "api-gateway"
+          },
+          "result": "api-gateway restarted successfully but 502 errors continue. The database is still down and the problem is upstream of api-gateway."
+        },
+        {
+          "action": {
+            "tool": "restart",
+            "service": "cache"
+          },
+          "result": "cache restarted successfully but 502 errors continue. The database is still crashed."
+        },
+        {
+          "action": {
+            "tool": "scale",
+            "service": "api-gateway",
+            "replicas": 3
+          },
+          "result": "api-gateway scaled to 3 replicas but 502 errors continue at the same rate. The database is still down."
+        }
+      ],
+      "initial_state": {
+        "api-gateway": {
+          "status": "degraded",
+          "cpu_pct": 45,
+          "memory_pct": 30,
+          "error_rate_pct": 48,
+          "latency_ms": 2800,
+          "replicas": 1
+        },
+        "cache": {
+          "status": "healthy",
+          "cpu_pct": 12,
+          "memory_pct": 20,
+          "error_rate_pct": 0,
+          "latency_ms": 4,
+          "replicas": 1
+        },
+        "database": {
+          "status": "crashed",
+          "cpu_pct": 0,
+          "memory_pct": 0,
+          "error_rate_pct": 100,
+          "latency_ms": 0,
+          "replicas": 1
+        },
+        "worker": {
+          "status": "healthy",
+          "cpu_pct": 8,
+          "memory_pct": 15,
+          "error_rate_pct": 0,
+          "latency_ms": 120,
+          "replicas": 1
+        }
+      },
+      "initial_alerts": [
+        {
+          "service": "api-gateway",
+          "severity": "critical",
+          "message": "HTTP 502 error rate at 48% - upstream connection refused"
+        },
+        {
+          "service": "database",
+          "severity": "critical",
+          "message": "Process not responding - last seen 4 minutes ago"
+        }
+      ],
+      "logs": {
+        "api-gateway": "2025-01-15 03:41:02 ERROR upstream connect error or disconnect/reset before headers. reset reason: connection failure\n2025-01-15 03:41:03 ERROR connect() failed (111: Connection refused) while connecting to upstream database:5432\n2025-01-15 03:41:03 WARN  retry attempt 3/3 to database:5432 - giving up\n2025-01-15 03:41:05 ERROR 502 Bad Gateway [database pool exhausted]\n2025-01-15 03:40:58 INFO  Request GET /api/users - forwarding to database\n2025-01-15 03:40:59 ERROR database:5432 connection timed out after 5000ms",
+        "cache": "2025-01-15 03:41:00 INFO  PING received - PONG sent\n2025-01-15 03:40:55 INFO  SET user:session:4429 TTL=3600\n2025-01-15 03:40:54 INFO  GET product:catalog:page1 HIT\n2025-01-15 03:40:52 INFO  Memory usage: 204MB / 1024MB (20%)\n2025-01-15 03:40:50 INFO  Active connections: 12",
+        "database": "2025-01-15 03:38:01 ERROR OutOfMemoryError: cannot allocate 524288 bytes - killed\n2025-01-15 03:38:00 WARN  Shared buffers at 98% capacity\n2025-01-15 03:37:58 WARN  Memory pressure detected - 1024MB / 1024MB used\n2025-01-15 03:37:55 INFO  Checkpoint starting: write\n2025-01-15 03:37:50 INFO  Connection from api-gateway:52441\n[process terminated - no further logs]",
+        "worker": "2025-01-15 03:41:00 INFO  Job queue poll - 0 items pending\n2025-01-15 03:40:55 INFO  Heartbeat OK\n2025-01-15 03:40:50 INFO  Job completed: send_email id=9912 in 340ms\n2025-01-15 03:40:45 INFO  Job completed: generate_report id=9911 in 2100ms"
+      },
+      "metrics": {
+        "api-gateway": {
+          "cpu": "cpu=45% (elevated but not critical - processing error responses)",
+          "memory": "memory=30% (1.2GB/4GB - normal)",
+          "latency": "p50=2800ms p95=8200ms p99=timeout - critical. Latency spike correlates with database outage 4 min ago.",
+          "error_rate": "error_rate=48% - 502s. Spike began at 03:38:02 exactly when database went down.",
+          "throughput": "throughput=210 req/s (50% of normal - half of traffic being rejected with 502)"
+        },
+        "cache": {
+          "cpu": "cpu=12% (normal)",
+          "memory": "memory=20% (204MB/1024MB - healthy)",
+          "latency": "p50=4ms p95=8ms - healthy",
+          "error_rate": "error_rate=0% - no errors",
+          "throughput": "throughput=1800 ops/s (normal)"
+        },
+        "database": {
+          "cpu": "cpu=0% - process is not running",
+          "memory": "memory=0% - process is not running (was killed by OOM at 03:38:01)",
+          "latency": "latency=n/a - process is not running",
+          "error_rate": "error_rate=100% - all connection attempts failing (ECONNREFUSED)",
+          "throughput": "throughput=0 queries/s - process not running"
+        },
+        "worker": {
+          "cpu": "cpu=8% (light load - no database jobs to process)",
+          "memory": "memory=15% (600MB/4GB - healthy)",
+          "latency": "job_duration_avg=n/a - no jobs running (database unavailable)",
+          "error_rate": "error_rate=0% - idle, not erroring",
+          "throughput": "throughput=0 jobs/min (normally 4/min - paused due to database outage)"
+        }
+      },
+      "dependencies": {
+        "api-gateway": "depends_on: [cache, database]. Cache-aside pattern: all GETs check cache first, then database. POSTs go direct to database. With database down, 48% of requests fail.",
+        "cache": "depends_on: []. Standalone Redis-compatible store. No downstream dependencies. Currently healthy.",
+        "database": "depends_on: []. Primary persistent store. Process was OOM-killed at 03:38:01. Needs restart to recover.",
+        "worker": "depends_on: [database]. Background job processor. Polls database job queue every 30s. Currently idle because database is unreachable."
+      },
+      "resolution": {
+        "restart_database": {
+          "trigger": {
+            "tool": "restart",
+            "service": "database"
+          },
+          "success": true,
+          "message": "database process restarted. Memory cleared. Process healthy. api-gateway connections recovering and 502 error rate is dropping.",
+          "final_state": {
+            "api-gateway": {
+              "status": "healthy",
+              "cpu_pct": 22,
+              "memory_pct": 30,
+              "error_rate_pct": 0,
+              "latency_ms": 45,
+              "replicas": 1
+            },
+            "cache": {
+              "status": "healthy",
+              "cpu_pct": 12,
+              "memory_pct": 20,
+              "error_rate_pct": 0,
+              "latency_ms": 4,
+              "replicas": 1
+            },
+            "database": {
+              "status": "healthy",
+              "cpu_pct": 18,
+              "memory_pct": 35,
+              "error_rate_pct": 0,
+              "latency_ms": 12,
+              "replicas": 1
+            },
+            "worker": {
+              "status": "healthy",
+              "cpu_pct": 8,
+              "memory_pct": 15,
+              "error_rate_pct": 0,
+              "latency_ms": 890,
+              "replicas": 1
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "medium_001",
+      "difficulty": "medium",
+      "name": "Cache Failure Cascade",
+      "description": "Cache crashed due to OOM. api-gateway now hits database directly for every request, overloading it. Trap: restarting database alone will just overload it again because cache is still down. Correct fix = restart cache first, then restart database.",
+      "root_cause_service": "cache",
+      "correct_fix_sequence": [
+        {
+          "tool": "restart",
+          "service": "cache"
+        },
+        {
+          "tool": "restart",
+          "service": "database"
+        }
+      ],
+      "trap_actions": [
+        {
+          "action": {
+            "tool": "restart",
+            "service": "database"
+          },
+          "result": "database restarted but overloaded again within 30 seconds. Cache is still down, so api-gateway floods database with 8x normal query load. Fix the root cause first."
+        },
+        {
+          "action": {
+            "tool": "scale",
+            "service": "database",
+            "replicas": 3
+          },
+          "result": "database scaled to 3 replicas but still overloaded. With cache down, api-gateway generates 8x normal query volume. Restore the cache first."
+        },
+        {
+          "action": {
+            "tool": "scale",
+            "service": "api-gateway",
+            "replicas": 1
+          },
+          "result": "api-gateway is already at 1 replica. No change. The problem is cache bypass causing database overload."
+        }
+      ],
+      "initial_state": {
+        "api-gateway": {
+          "status": "degraded",
+          "cpu_pct": 71,
+          "memory_pct": 45,
+          "error_rate_pct": 35,
+          "latency_ms": 3200,
+          "replicas": 1
+        },
+        "cache": {
+          "status": "crashed",
+          "cpu_pct": 0,
+          "memory_pct": 0,
+          "error_rate_pct": 100,
+          "latency_ms": 0,
+          "replicas": 1
+        },
+        "database": {
+          "status": "overloaded",
+          "cpu_pct": 94,
+          "memory_pct": 88,
+          "error_rate_pct": 35,
+          "latency_ms": 4200,
+          "replicas": 1
+        },
+        "worker": {
+          "status": "degraded",
+          "cpu_pct": 20,
+          "memory_pct": 22,
+          "error_rate_pct": 40,
+          "latency_ms": 8900,
+          "replicas": 1
+        }
+      },
+      "initial_alerts": [
+        {
+          "service": "cache",
+          "severity": "critical",
+          "message": "Service unreachable - health check failing for 8 minutes"
+        },
+        {
+          "service": "database",
+          "severity": "critical",
+          "message": "CPU at 94% - connection queue backed up (1240 waiting)"
+        },
+        {
+          "service": "api-gateway",
+          "severity": "warning",
+          "message": "Latency p95 > 3s - degraded but still serving"
+        },
+        {
+          "service": "worker",
+          "severity": "warning",
+          "message": "Job queue growing - database too slow to process (847 pending)"
+        }
+      ],
+      "logs": {
+        "api-gateway": "2025-01-15 04:12:01 WARN  cache hit ratio: 0% - cache unreachable, all requests falling through to database\n2025-01-15 04:12:00 ERROR cache:6379 connection refused - bypassing cache, querying database directly\n2025-01-15 04:11:58 WARN  database response time 4200ms (threshold: 500ms)\n2025-01-15 04:11:55 INFO  Request GET /api/products - cache miss (cache down) - querying database\n2025-01-15 04:11:54 INFO  Request GET /api/users - cache miss (cache down) - querying database\n2025-01-15 04:11:52 WARN  database connection pool: 95/100 connections used",
+        "cache": "2025-01-15 04:04:10 ERROR SIGKILL received - out of memory\n2025-01-15 04:04:08 WARN  Memory at 99% - eviction failing (maxmemory-policy=noeviction)\n2025-01-15 04:04:05 ERROR Cannot allocate memory for new keys - maxmemory reached\n2025-01-15 04:04:00 INFO  Memory: 1023MB / 1024MB used\n[process terminated by OOM killer]",
+        "database": "2025-01-15 04:12:02 WARN  Too many connections: 1240 queued (max: 100 active)\n2025-01-15 04:12:01 WARN  CPU load 94% - query planner severely degraded\n2025-01-15 04:11:59 ERROR query timeout after 5000ms: SELECT * FROM products WHERE category_id=...\n2025-01-15 04:11:55 WARN  Autovacuum worker blocked - CPU utilization too high\n2025-01-15 04:11:50 INFO  Connection from api-gateway:52109 [total active: 340]\n2025-01-15 04:11:48 INFO  Connection from api-gateway:52108 [total active: 339]",
+        "worker": "2025-01-15 04:12:00 WARN  Job queue depth: 847 pending (normal: <50)\n2025-01-15 04:11:55 ERROR Job id=10441 failed - database query timeout after 5000ms\n2025-01-15 04:11:50 WARN  database response latency 8900ms - jobs critically slow\n2025-01-15 04:11:45 INFO  Polling job queue... 847 items waiting"
+      },
+      "metrics": {
+        "cache": {
+          "cpu": "cpu=0% - process not running (OOM killed 8 minutes ago)",
+          "memory": "memory=0% - process not running",
+          "latency": "latency=n/a - process not running",
+          "error_rate": "error_rate=100%",
+          "throughput": "throughput=0 ops/s - down"
+        },
+        "database": {
+          "cpu": "cpu=94% - critical. Sustained high CPU for 7+ minutes.",
+          "memory": "memory=88% (7GB/8GB) - near limit from connection overhead",
+          "latency": "p50=4200ms p95=9800ms p99=timeout - severely degraded",
+          "error_rate": "error_rate=35% - query timeouts under extreme load",
+          "throughput": "throughput=1240 connections queued - receiving 8x normal load because cache is bypassed"
+        },
+        "api-gateway": {
+          "cpu": "cpu=71% - elevated (processing all cache fallthrough logic)",
+          "memory": "memory=45% (1.8GB/4GB)",
+          "latency": "p50=3200ms p95=7100ms - degraded, matching database slowdown",
+          "error_rate": "error_rate=35% - error rate matches database error rate exactly",
+          "throughput": "throughput=420 req/s - full normal load but 0% cache hit ratio"
+        },
+        "worker": {
+          "cpu": "cpu=20%",
+          "memory": "memory=22%",
+          "latency": "job_duration_avg=8900ms (normal: 890ms) - 10x slowdown",
+          "error_rate": "error_rate=40% - job failures from database timeouts",
+          "throughput": "throughput=0.4 jobs/min (normal: 4) - 90% reduction"
+        }
+      },
+      "dependencies": {
+        "api-gateway": "depends_on: [cache, database]. Cache-aside: check cache first on every GET, then database on miss. With cache down, 100% of GET requests hit database and generate 8x normal database load.",
+        "cache": "depends_on: []. Standalone. OOM killed 8 minutes ago. When down, api-gateway generates 8x normal database load. This is the root cause.",
+        "database": "depends_on: []. Currently receiving 8x normal query volume because cache is bypassed. It is the victim, not the root cause.",
+        "worker": "depends_on: [database]. Background processor. Severely degraded because database is overloaded."
+      },
+      "resolution": {
+        "step1_restart_cache": {
+          "trigger": {
+            "tool": "restart",
+            "service": "cache"
+          },
+          "success": true,
+          "message": "cache restarted successfully. Service healthy. api-gateway cache hit ratio is recovering and database load is dropping.",
+          "intermediate_state": {
+            "api-gateway": {
+              "status": "degraded",
+              "cpu_pct": 45,
+              "memory_pct": 38,
+              "error_rate_pct": 12,
+              "latency_ms": 1200,
+              "replicas": 1
+            },
+            "cache": {
+              "status": "healthy",
+              "cpu_pct": 15,
+              "memory_pct": 10,
+              "error_rate_pct": 0,
+              "latency_ms": 3,
+              "replicas": 1
+            },
+            "database": {
+              "status": "overloaded",
+              "cpu_pct": 75,
+              "memory_pct": 70,
+              "error_rate_pct": 20,
+              "latency_ms": 2100,
+              "replicas": 1
+            },
+            "worker": {
+              "status": "degraded",
+              "cpu_pct": 20,
+              "memory_pct": 22,
+              "error_rate_pct": 15,
+              "latency_ms": 3200,
+              "replicas": 1
+            }
+          }
+        },
+        "step2_restart_database": {
+          "trigger": {
+            "tool": "restart",
+            "service": "database"
+          },
+          "success": true,
+          "message": "database restarted. Connection queue cleared. All services recovering. System fully healthy.",
+          "final_state": {
+            "api-gateway": {
+              "status": "healthy",
+              "cpu_pct": 25,
+              "memory_pct": 32,
+              "error_rate_pct": 0,
+              "latency_ms": 55,
+              "replicas": 1
+            },
+            "cache": {
+              "status": "healthy",
+              "cpu_pct": 15,
+              "memory_pct": 10,
+              "error_rate_pct": 0,
+              "latency_ms": 3,
+              "replicas": 1
+            },
+            "database": {
+              "status": "healthy",
+              "cpu_pct": 22,
+              "memory_pct": 40,
+              "error_rate_pct": 0,
+              "latency_ms": 14,
+              "replicas": 1
+            },
+            "worker": {
+              "status": "healthy",
+              "cpu_pct": 18,
+              "memory_pct": 22,
+              "error_rate_pct": 0,
+              "latency_ms": 910,
+              "replicas": 1
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "hard_001",
+      "difficulty": "hard",
+      "name": "Bad Deploy - Memory Leak Cascade",
+      "description": "A bad deployment of worker (v2.4.1) introduced an unbounded connection pool bug. Over 90 minutes it consumed memory and corrupted the database connection pool. Trap: fixing database or api-gateway first does nothing because worker will re-corrupt them. Correct fix sequence = rollback worker -> restart database -> restart api-gateway.",
+      "root_cause_service": "worker",
+      "correct_fix_sequence": [
+        {
+          "tool": "rollback",
+          "service": "worker",
+          "version": "previous"
+        },
+        {
+          "tool": "restart",
+          "service": "database"
+        },
+        {
+          "tool": "restart",
+          "service": "api-gateway"
+        }
+      ],
+      "trap_actions": [
+        {
+          "action": {
+            "tool": "restart",
+            "service": "database"
+          },
+          "result": "database restarted but worker (still running bad v2.4.1) immediately reconnects and begins leaking connections again. Roll back worker first."
+        },
+        {
+          "action": {
+            "tool": "restart",
+            "service": "api-gateway"
+          },
+          "result": "api-gateway restarted but 503s continue immediately. Database is still corrupted by worker. api-gateway is the victim, not the cause."
+        },
+        {
+          "action": {
+            "tool": "rollback",
+            "service": "database",
+            "version": "previous"
+          },
+          "result": "database has no deployable previous version. Nothing changed."
+        },
+        {
+          "action": {
+            "tool": "rollback",
+            "service": "api-gateway",
+            "version": "previous"
+          },
+          "result": "api-gateway has no recent deployment to roll back. Nothing changed."
+        },
+        {
+          "action": {
+            "tool": "scale",
+            "service": "worker",
+            "replicas": 1
+          },
+          "result": "worker is already at 1 replica. Scaling does not fix a memory leak bug."
+        }
+      ],
+      "initial_state": {
+        "api-gateway": {
+          "status": "degraded",
+          "cpu_pct": 52,
+          "memory_pct": 38,
+          "error_rate_pct": 55,
+          "latency_ms": 5100,
+          "replicas": 1
+        },
+        "cache": {
+          "status": "healthy",
+          "cpu_pct": 14,
+          "memory_pct": 22,
+          "error_rate_pct": 0,
+          "latency_ms": 5,
+          "replicas": 1
+        },
+        "database": {
+          "status": "overloaded",
+          "cpu_pct": 88,
+          "memory_pct": 92,
+          "error_rate_pct": 55,
+          "latency_ms": 6800,
+          "replicas": 1
+        },
+        "worker": {
+          "status": "degraded",
+          "cpu_pct": 95,
+          "memory_pct": 97,
+          "error_rate_pct": 80,
+          "latency_ms": 0,
+          "replicas": 1
+        }
+      },
+      "initial_alerts": [
+        {
+          "service": "worker",
+          "severity": "critical",
+          "message": "Memory at 97% - OOM imminent. Deployed 90 minutes ago (v2.4.1). Previous stable version: v2.4.0"
+        },
+        {
+          "service": "database",
+          "severity": "critical",
+          "message": "Connection pool corrupted - intermittent crashes every 90 seconds"
+        },
+        {
+          "service": "api-gateway",
+          "severity": "critical",
+          "message": "503 error rate 55% - database connection failures"
+        },
+        {
+          "service": "worker",
+          "severity": "warning",
+          "message": "CPU 95% - almost entirely garbage collection overhead (memory leak)"
+        }
+      ],
+      "logs": {
+        "api-gateway": "2025-01-15 05:30:01 ERROR 503 Service Unavailable - database connection refused\n2025-01-15 05:30:00 WARN  Database failover triggered - no healthy replica available\n2025-01-15 05:29:58 ERROR connection pool exhausted - all 100 connections in error state\n2025-01-15 05:29:55 INFO  Request POST /api/orders - forwarded to database - timeout\n2025-01-15 05:29:50 INFO  Request GET /api/products - cache hit [ok]\n2025-01-15 05:29:48 ERROR Request GET /api/user/profile - database error: connection reset by peer",
+        "cache": "2025-01-15 05:30:00 INFO  PING - PONG\n2025-01-15 05:29:55 INFO  Hit ratio: 68% (normal)\n2025-01-15 05:29:50 INFO  Memory: 225MB / 1024MB (22%) - healthy\n2025-01-15 05:29:45 INFO  Active connections: 14 (normal)\n2025-01-15 05:29:40 INFO  Evictions: 0 (healthy)",
+        "database": "2025-01-15 05:30:02 ERROR connection reset: worker-service:44921 sent malformed packet - pool entry corrupted\n2025-01-15 05:30:00 WARN  32/100 connections in error state (corrupted by worker)\n2025-01-15 05:29:58 ERROR connection reset: worker-service:44918 sent malformed packet\n2025-01-15 05:29:55 WARN  Memory pressure from worker connection leak: 7.3GB/8GB\n2025-01-15 05:29:50 INFO  Connection from api-gateway:61221 - timeout (pool at capacity)\n2025-01-15 05:29:45 ERROR worker-service connection pool leak detected - connections not released after jobs\n2025-01-15 05:28:00 WARN  worker-service holding 68 persistent connections (normal: 5-10)",
+        "worker": "2025-01-15 05:30:01 ERROR java.lang.OutOfMemoryError: Java heap space\n2025-01-15 05:30:00 WARN  Heap: 7.76GB / 8GB (97%)\n2025-01-15 05:29:55 WARN  GC overhead limit exceeded - 98% of CPU time spent in garbage collection\n2025-01-15 05:29:50 WARN  Connection leak: 68 database connections open (not released after jobs complete)\n2025-01-15 05:29:45 ERROR Job id=11201 failed - OutOfMemoryError during processing\n2025-01-15 05:29:00 INFO  [v2.4.1] Connection pool initialized with unbounded size (BUG: was bounded in v2.4.0)\n2025-01-15 04:00:01 INFO  [v2.4.1] worker-service started - new deployment 90 minutes ago"
+      },
+      "metrics": {
+        "worker": {
+          "cpu": "cpu=95% - critical. Nearly all CPU is spent in garbage collection from the memory leak.",
+          "memory": "memory=97% (7.76GB/8GB) - OOM imminent. Growing at +50MB/minute since v2.4.1 deployed 90 minutes ago.",
+          "latency": "job_duration_avg=n/a - jobs fail before completion due to OOM",
+          "error_rate": "error_rate=80% - OOM errors on almost every job",
+          "throughput": "throughput=0 jobs/min. Deployed version: v2.4.1. Previous stable: v2.4.0"
+        },
+        "database": {
+          "cpu": "cpu=88% - elevated from malformed packet processing from worker",
+          "memory": "memory=92% (7.3GB/8GB) - elevated from worker connection leak (68 unreleased connections)",
+          "latency": "p50=6800ms p95=timeout - severe degradation",
+          "error_rate": "error_rate=55% - connection pool corruption from worker v2.4.1",
+          "throughput": "throughput=32% of connections corrupted - legitimate connections compete with leaked worker connections"
+        },
+        "api-gateway": {
+          "cpu": "cpu=52% - normal-ish",
+          "memory": "memory=38% (1.5GB/4GB) - normal",
+          "latency": "p50=5100ms p95=timeout",
+          "error_rate": "error_rate=55% - all errors trace to database connection failures",
+          "throughput": "throughput=190 req/s (55% of normal). Cache is working fine, only DB-dependent requests fail."
+        },
+        "cache": {
+          "cpu": "cpu=14% - healthy",
+          "memory": "memory=22% - healthy",
+          "latency": "p50=5ms - healthy",
+          "error_rate": "error_rate=0% - healthy, not the problem",
+          "throughput": "throughput=1650 ops/s - healthy"
+        }
+      },
+      "dependencies": {
+        "api-gateway": "depends_on: [cache, database]. Cache is working fine (68% hit ratio). All database-dependent requests are failing due to a corrupted pool.",
+        "cache": "depends_on: []. Healthy. Not the problem.",
+        "database": "depends_on: []. Receiving malformed connection packets from worker v2.4.1. 32% of pool entries are corrupt. Needs restart after worker is rolled back.",
+        "worker": "depends_on: [database]. Version v2.4.1 has an unbounded connection pool bug. It is holding 68 persistent database connections (normal: 5-10). Must be rolled back to v2.4.0 first."
+      },
+      "resolution": {
+        "step1_rollback_worker": {
+          "trigger": {
+            "tool": "rollback",
+            "service": "worker",
+            "version": "previous"
+          },
+          "success": true,
+          "message": "worker rolled back to v2.4.0. The memory leak and connection leak have stopped. Database still needs restart to clear existing corruption.",
+          "intermediate_state": {
+            "api-gateway": {
+              "status": "degraded",
+              "cpu_pct": 52,
+              "memory_pct": 38,
+              "error_rate_pct": 45,
+              "latency_ms": 4200,
+              "replicas": 1
+            },
+            "cache": {
+              "status": "healthy",
+              "cpu_pct": 14,
+              "memory_pct": 22,
+              "error_rate_pct": 0,
+              "latency_ms": 5,
+              "replicas": 1
+            },
+            "database": {
+              "status": "overloaded",
+              "cpu_pct": 70,
+              "memory_pct": 75,
+              "error_rate_pct": 40,
+              "latency_ms": 3200,
+              "replicas": 1
+            },
+            "worker": {
+              "status": "healthy",
+              "cpu_pct": 8,
+              "memory_pct": 15,
+              "error_rate_pct": 0,
+              "latency_ms": 920,
+              "replicas": 1
+            }
+          }
+        },
+        "step2_restart_database": {
+          "trigger": {
+            "tool": "restart",
+            "service": "database"
+          },
+          "success": true,
+          "message": "database restarted. Connection pool cleared and healthy. Error rate is dropping on api-gateway.",
+          "intermediate_state": {
+            "api-gateway": {
+              "status": "degraded",
+              "cpu_pct": 40,
+              "memory_pct": 38,
+              "error_rate_pct": 10,
+              "latency_ms": 1200,
+              "replicas": 1
+            },
+            "cache": {
+              "status": "healthy",
+              "cpu_pct": 14,
+              "memory_pct": 22,
+              "error_rate_pct": 0,
+              "latency_ms": 5,
+              "replicas": 1
+            },
+            "database": {
+              "status": "healthy",
+              "cpu_pct": 20,
+              "memory_pct": 38,
+              "error_rate_pct": 5,
+              "latency_ms": 800,
+              "replicas": 1
+            },
+            "worker": {
+              "status": "healthy",
+              "cpu_pct": 8,
+              "memory_pct": 15,
+              "error_rate_pct": 0,
+              "latency_ms": 920,
+              "replicas": 1
+            }
+          }
+        },
+        "step3_restart_api_gateway": {
+          "trigger": {
+            "tool": "restart",
+            "service": "api-gateway"
+          },
+          "success": true,
+          "message": "api-gateway restarted. All stale connection state cleared. System fully healthy.",
+          "final_state": {
+            "api-gateway": {
+              "status": "healthy",
+              "cpu_pct": 22,
+              "memory_pct": 30,
+              "error_rate_pct": 0,
+              "latency_ms": 48,
+              "replicas": 1
+            },
+            "cache": {
+              "status": "healthy",
+              "cpu_pct": 14,
+              "memory_pct": 22,
+              "error_rate_pct": 0,
+              "latency_ms": 5,
+              "replicas": 1
+            },
+            "database": {
+              "status": "healthy",
+              "cpu_pct": 19,
+              "memory_pct": 38,
+              "error_rate_pct": 0,
+              "latency_ms": 11,
+              "replicas": 1
+            },
+            "worker": {
+              "status": "healthy",
+              "cpu_pct": 8,
+              "memory_pct": 15,
+              "error_rate_pct": 0,
+              "latency_ms": 920,
+              "replicas": 1
+            }
+          }
+        }
+      }
+    }
+  ]
+}

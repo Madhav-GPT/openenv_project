@@ -30,14 +30,37 @@ The dev server exposes the standard OpenEnv API plus:
 
 ## Baseline And Learning Curve
 
+This project now prefers your local Ollama model by default:
+
 ```bash
+ollama serve
 make baseline
 make learning-curve
 ```
 
-If `GROQ_API_KEY` is set, the baseline script can query Groq's OpenAI-compatible
-chat model. Without that key, both scripts fall back to deterministic local policies
-so the project still runs end to end.
+Defaults:
+
+- Provider preference: local Ollama -> Groq -> heuristic fallback
+- Local model: `qwen2.5:7b`
+- Override model: `OLLAMA_MODEL=<other-model> make baseline`
+- Override provider explicitly:
+  `python -m sre_env.scripts.baseline_agent --provider ollama --model qwen2.5:7b`
+- Quick local-model smoke for the learning-curve path:
+  `python -m sre_env.scripts.learning_curve --provider ollama --model qwen2.5:7b --episodes 1`
+- Optional saved image artifact:
+  `python -m sre_env.scripts.learning_curve --provider ollama --model qwen2.5:7b --episodes 1 --save-plot`
+- Full learning-curve runs with a local 7B model can take a while because they issue many sequential inference calls.
+
+While the scripts run, Terminal 2 now shows a live dashboard with:
+
+- side-by-side difficulty panels
+- reward progression
+- per-step and cumulative reward graphs
+- model latency and token/sec
+- current action, alerts, and service health
+- baseline vs few-shot comparison during learning-curve runs
+
+The live dashboard is now the default output. `learning_curve.png` is only written if you pass `--save-plot`.
 
 ## Scenarios
 
