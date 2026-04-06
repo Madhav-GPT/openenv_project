@@ -1,6 +1,13 @@
 # 🏆 SRE-Env: Incident Response Commander
 ## FINAL Antigravity Build Prompt — Complete Implementation
 
+> Archive note: this file is historical build context from an earlier phase.
+> The canonical repo surface is now the Ollama-only Phase 2 implementation described in
+> [README.md](/Users/madhav_189/Documents/meta_hackathon/madhav_trial/README.md),
+> [execution.md](/Users/madhav_189/Documents/meta_hackathon/madhav_trial/execution.md),
+> [Makefile](/Users/madhav_189/Documents/meta_hackathon/madhav_trial/Makefile),
+> and [inference.py](/Users/madhav_189/Documents/meta_hackathon/madhav_trial/inference.py).
+
 > **How to use:** Paste this entire document as your Project Context in Antigravity.
 > Build files IN ORDER — each step depends on the previous one.
 > Every `[IMPLEMENT]` section = write that file completely. Every `[CONTEXT]` section = read it, don't skip it.

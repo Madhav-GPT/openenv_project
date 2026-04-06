@@ -1,4 +1,4 @@
-"""Shared LLM backend helpers for local Ollama and optional Groq."""
+"""Shared LLM backend helpers for local Ollama and heuristic fallback."""
 
 from __future__ import annotations
 
@@ -10,11 +10,6 @@ from typing import Any
 
 import httpx
 
-try:
-    from groq import Groq
-except ImportError:  # pragma: no cover - exercised only when dependency is missing
-    Groq = None
-
 DEFAULT_OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
 DEFAULT_OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
 
@@ -24,7 +19,6 @@ class LLMConfig:
     provider: str
     model: str
     ollama_host: str = DEFAULT_OLLAMA_HOST
-    groq_client: Any | None = None
 
 
 @dataclass
@@ -78,8 +72,6 @@ def resolve_provider(
     if provider == "auto":
         if ollama_has_model(model, ollama_host):
             return "ollama"
-        if os.environ.get("GROQ_API_KEY") and Groq is not None:
-            return "groq"
         return "heuristic"
 
     if provider == "ollama" and not ollama_has_model(model, ollama_host):
@@ -87,10 +79,6 @@ def resolve_provider(
             f"Ollama model {model!r} was not found at {ollama_host}. "
             "Start `ollama serve` and ensure the model is pulled."
         )
-
-    if provider == "groq":
-        if Groq is None or not os.environ.get("GROQ_API_KEY"):
-            raise RuntimeError("GROQ_API_KEY is required for provider=groq.")
 
     return provider
 
@@ -103,14 +91,10 @@ def build_llm_config(
     """Build a resolved LLM configuration."""
 
     resolved_provider = resolve_provider(provider, model, ollama_host)
-    groq_client = None
-    if resolved_provider == "groq":
-        groq_client = Groq(api_key=os.environ["GROQ_API_KEY"])
     return LLMConfig(
         provider=resolved_provider,
         model=model,
         ollama_host=ollama_host,
-        groq_client=groq_client,
     )
 
 
@@ -204,28 +188,6 @@ def call_action_model(
                 ),
                 load_s=round(_ns_to_s(payload.get("load_duration")), 3),
                 done_reason=str(payload.get("done_reason") or ""),
-                raw_preview=raw.strip().replace("\n", " ")[:180],
-            )
-        else:
-            response = config.groq_client.chat.completions.create(
-                model=config.model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
-            raw = (response.choices[0].message.content or "").strip()
-            usage = getattr(response, "usage", None)
-            prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
-            completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
-            latency_s = round(perf_counter() - started, 3)
-            metrics = LLMCallMetrics(
-                provider="groq",
-                model=config.model,
-                latency_s=latency_s,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                completion_tps=_safe_tps(completion_tokens, latency_s),
-                total_tps=_safe_tps(prompt_tokens + completion_tokens, latency_s),
                 raw_preview=raw.strip().replace("\n", " ")[:180],
             )
         action = extract_json_object(raw)

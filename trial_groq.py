@@ -1,3 +1,5 @@
+"""Archived Groq connectivity scratch file from an earlier prototype."""
+
 import urllib.request
 import json
 import ssl

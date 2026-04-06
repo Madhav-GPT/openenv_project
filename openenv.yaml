@@ -1,8 +1,8 @@
 name: sre-env
-version: 1.0.0
+version: 2.0.0
 description: >
-  SRE Incident Response Commander trains agents to diagnose and fix
-  multi-service production incidents with dependency traps and dense rewards.
+  Unified three-phase incident response environment combining infrastructure
+  triage, security remediation, and post-mortem reasoning.
 author: Madhav
 license: MIT
 
@@ -10,11 +10,11 @@ environment:
   action_type: SREAction
   observation_type: SREObservation
   state_type: SREState
-  max_steps: 20
+  max_steps: 25
   difficulties: [easy, medium, hard]
   reward_type: dense
 
 huggingface:
-  space_id: your-username/sre-env
+  space_id: madhav/sre-env
   sdk: docker
   hardware: cpu-basic

@@ -1,0 +1,23 @@
+[
+  {
+    "task_id": "easy_001",
+    "steps": 6,
+    "success": true,
+    "score": 1.0,
+    "cumulative_reward": 2.5235
+  },
+  {
+    "task_id": "medium_001",
+    "steps": 8,
+    "success": true,
+    "score": 1.0,
+    "cumulative_reward": 3.2795
+  },
+  {
+    "task_id": "hard_001",
+    "steps": 10,
+    "success": true,
+    "score": 1.0,
+    "cumulative_reward": 3.515
+  }
+]

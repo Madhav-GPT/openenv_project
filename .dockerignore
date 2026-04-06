@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+.git/
+.pytest_cache/
+outputs/
+*.egg-info/
+dist/
+build/
+.gemini/
+madhav_trial/
+*.png
+*.npz
+node_modules/

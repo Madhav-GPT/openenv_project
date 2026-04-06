@@ -227,7 +227,7 @@ def _render_learning_curve_difficulty(state: DifficultyState) -> Panel:
         ),
         f"  {_sparkline(state.baseline_rewards)}",
         (
-            f"fewshot avg={_avg(state.fewshot_rewards):+.2f} "
+            f"reference avg={_avg(state.fewshot_rewards):+.2f} "
             f"latest={_latest(state.fewshot_rewards):+.2f}"
         ),
         f"  {_sparkline(state.fewshot_rewards)}",
@@ -403,7 +403,7 @@ class BaselineDashboard:
 LC_SCENARIOS_PATH = Path(__file__).resolve().parent.parent / "data" / "scenarios.json"
 LC_INVESTIGATION_TOOLS = {"get_logs", "get_metrics", "get_dependencies"}
 LC_AGENT_COLORS = {"baseline": "orange1", "fewshot": "green"}
-LC_AGENT_LABELS = {"baseline": "BASELINE AGENT", "fewshot": "FEW-SHOT AGENT"}
+LC_AGENT_LABELS = {"baseline": "BASELINE AGENT", "fewshot": "REFERENCE AGENT"}
 LC_DIFFICULTY_SHORT = {"easy": "E", "medium": "M", "hard": "H"}
 LC_DIFFICULTY_COLORS = {"easy": "green", "medium": "yellow", "hard": "red"}
 LC_STATUS_STYLES = {
@@ -1032,7 +1032,7 @@ def render_difficulty_panel(
     badge_style = "bold green" if done else ("bold yellow" if running else "dim white")
     legend = Text()
     legend.append("● baseline   ", style="orange1")
-    legend.append("● few-shot", style="green")
+    legend.append("● reference", style="green")
 
     stats = Table.grid(expand=True)
     for _ in range(4):
@@ -1040,7 +1040,7 @@ def render_difficulty_panel(
     episodes_style = "green" if done else ("yellow" if running else "dim white")
     stats.add_row(
         Text.assemble((_lc_format_reward(avg_base), "bold orange1"), ("\nbase avg", "dim white")),
-        Text.assemble((_lc_format_reward(avg_few), "bold green"), ("\nfew-shot", "dim white")),
+        Text.assemble((_lc_format_reward(avg_few), "bold green"), ("\nreference", "dim white")),
         Text.assemble((_lc_format_reward(delta), _lc_delta_style(delta)), ("\ndelta", "dim white")),
         Text.assemble((f"{completed}/{total_episodes}", episodes_style), ("\nepisodes", "dim white")),
     )

@@ -1,14 +1,55 @@
 # SRE-Env: Incident Response Commander
 
-An OpenEnv reinforcement-learning environment where an agent plays an on-call SRE
-diagnosing and fixing a broken 4-service production system.
+SRE-Env is an OpenEnv simulation where an AI agent handles a production incident across three connected phases:
 
-## What makes this hard
+1. **Infrastructure triage** — investigate logs, metrics, and dependencies to diagnose the root cause
+2. **Security remediation** — classify vulnerability, apply the correct patch, verify it works
+3. **Post-mortem reasoning** — explain root cause, attack vector, fix sequence, and prevention
 
-- 4-service dependency graph: `api-gateway -> cache -> database -> worker`
-- Trap states: the visibly broken service is often not the root cause
-- Multi-step fixes: medium requires 2 ordered fixes, hard requires 3
-- Dense rewards: investigation is rewarded separately from remediation
+Each incident has a causal security root cause hidden behind misleading symptoms. The most visibly broken service is often not the root cause.
+
+## Environment Shape
+
+- Services: `api-gateway → cache → database → worker`
+- Difficulties: `easy` (15 ticks), `medium` (20 ticks), `hard` (25 ticks)
+- Tasks: `easy_001`, `medium_001`, `hard_001`
+- Scores: normalized to `0.0..1.0`
+
+### Action Space
+
+| Phase | Tools |
+|-------|-------|
+| Phase 1: Investigation | `get_logs`, `get_metrics`, `get_dependencies` |
+| Phase 1: Remediation | `restart`, `scale`, `rollback` |
+| Phase 2: Security | `classify_vuln`, `apply_patch`, `verify_patch` |
+| Phase 3: Reasoning | `post_mortem` |
+
+### Observation Space
+
+- Tick budget and current difficulty
+- Service health (status, cpu, memory, error rate, latency)
+- Active alerts with severity
+- Tool output and last action result
+- Phase status: `phase`, `phase2_unlocked`, `phase2_complete`, `security_sub_quest`, `websec_state`
+- Post-mortem status: `postmortem_available`, `postmortem_submitted`
+- Scoring: `final_score`, `phase_scores`
+
+### Scoring Breakdown
+
+| Component | Max | How |
+|-----------|-----|-----|
+| Infrastructure | 0.50 | All services healthy + root cause investigated + fix sequence + efficiency |
+| Security | 0.40 | Phase 2 unlocked + classify + correct patch + exploit blocked + functionality ok |
+| Post-mortem | 0.30 | Deterministic keyword matching on root cause, attack vector, prevention, fix sequence |
+| **Total** | **1.00** | Capped at 1.0 |
+
+## Why This Is Hard
+
+- The most visibly broken service is often **not** the root cause
+- Medium and hard scenarios require **ordered fix sequences**
+- Security is not bolted on — it **explains** the infrastructure failure
+- The agent trades off exploration against per-tick penalties
+- Trap actions punish the obvious-but-wrong fix (e.g., restarting the symptomatic service)
 
 ## Quick Start
 
@@ -16,69 +57,70 @@ diagnosing and fixing a broken 4-service production system.
 python3 -m venv .venv
 source .venv/bin/activate
 make install
-make dev
-make test
+make dev          # Start the environment server
+python inference.py   # Run the submission script
 ```
 
-The dev server exposes the standard OpenEnv API plus:
+## Environment Variables
 
-- `GET /tasks`
-- `GET /grader`
-- `GET /baseline`
-- `GET /status`
-- `GET /health`
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `API_BASE_URL` | Yes | `http://127.0.0.1:11434/v1` | LLM API endpoint (OpenAI-compatible) |
+| `MODEL_NAME` | Yes | `qwen2.5:1.5b` | Model identifier |
+| `HF_TOKEN` | Yes | `local` | HuggingFace / API key |
+| `ENV_BASE_URL` | No | `http://127.0.0.1:8000` | Environment server URL |
 
-## Baseline And Learning Curve
+## API Routes
 
-This project now prefers your local Ollama model by default:
+| Route | Method | Description |
+|-------|--------|-------------|
+| `/health` | GET | Health check |
+| `/metadata` | GET | Environment metadata |
+| `/schema` | GET | Action/observation/state schemas |
+| `/tasks` | GET | List scenarios |
+| `/baseline` | GET | Baseline trajectories |
+| `/grader` | GET | Grade current episode |
+| `/status` | GET | Runtime status |
+| `/unified-tasks` | GET | List unified scenarios |
+| `/phase2-baseline` | GET | Phase 2 baselines |
+| `/reset` | POST | Reset environment |
+| `/step` | POST | Take action |
+| `/state` | GET | Current state |
+
+## Training (Optional)
+
+Discover better action trajectories using few-shot learning:
 
 ```bash
-ollama serve
-make baseline
-make learning-curve
+make train-easy       # 50 iterations on easy scenario
+make train-medium     # 75 iterations on medium scenario
+make train-hard       # 100 iterations on hard scenario
 ```
 
-Defaults:
+The trainer uses in-context learning: it runs episodes, stores full trajectories, and injects the top-K best trajectories as few-shot examples in the system prompt. The `inference.py` script automatically loads the trained policy if available.
 
-- Provider preference: local Ollama -> Groq -> heuristic fallback
-- Local model: `qwen2.5:7b`
-- Override model: `OLLAMA_MODEL=<other-model> make baseline`
-- Override provider explicitly:
-  `python -m sre_env.scripts.baseline_agent --provider ollama --model qwen2.5:7b`
-- Quick local-model smoke for the learning-curve path:
-  `python -m sre_env.scripts.learning_curve --provider ollama --model qwen2.5:7b --episodes 1`
-- Optional saved image artifact:
-  `python -m sre_env.scripts.learning_curve --provider ollama --model qwen2.5:7b --episodes 1 --save-plot`
-- Full learning-curve runs with a local 7B model can take a while because they issue many sequential inference calls.
+Output artifacts in `outputs/grpo_sre/`:
+- `trained_policy.json` — best action sequences per scenario
+- `trajectory_memory.json` — full trajectory memory for few-shot learning
+- `reward_history.json` — training metrics
 
-While the scripts run, Terminal 2 now shows a live dashboard with:
+## Inference Contract
 
-- side-by-side difficulty panels
-- reward progression
-- per-step and cumulative reward graphs
-- model latency and token/sec
-- current action, alerts, and service health
-- baseline vs few-shot comparison during learning-curve runs
+The root-level `inference.py` is the submission script. It:
+- Uses the **OpenAI client** for all LLM calls
+- Emits structured stdout: `[START]`, `[STEP]`, `[END]`
+- Loads trained policies if available, falls back to optimal baselines
+- Completes all 3 tasks within the 20-minute time limit
 
-The live dashboard is now the default output. `learning_curve.png` is only written if you pass `--save-plot`.
+## Validation
 
-## Scenarios
+```bash
+make validate         # Local structure check (openenv validate .)
+make pre-validate     # Full end-to-end validation
+```
 
-| ID | Difficulty | Root Cause | Trap |
-| --- | --- | --- | --- |
-| `easy_001` | Easy | database OOM crash | restarting `api-gateway` does nothing |
-| `medium_001` | Medium | cache OOM -> database overload | restarting `database` first overloads it again |
-| `hard_001` | Hard | worker bad deploy -> DB corruption | restarting `database` first lets worker re-corrupt it |
+## Deployment
 
-## Reward Function
-
-| Event | Reward |
-| --- | --- |
-| Each tick | `-0.05` |
-| First investigation of root cause | `+0.15` |
-| Investigation of another service | `+0.08` |
-| Correct fix in sequence | `+0.35` |
-| Trap action | `-0.20` |
-| Alert cleared | `+0.20` |
-| All services healthy | `+1.00` |
-# openenv_project
+- Hugging Face Spaces: uses the root `Dockerfile`
+- OpenEnv multi-mode: `server/app.py` wraps `sre_env/server/app.py`
+- All scoring is deterministic — no external LLM needed for the environment
