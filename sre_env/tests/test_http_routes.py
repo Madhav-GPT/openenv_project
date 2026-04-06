@@ -11,6 +11,7 @@ def test_health() -> None:
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["environment"] == "sre_env"
+    assert response.json()["status"] == "healthy"
 
 
 def test_tasks_all() -> None:
@@ -61,3 +62,18 @@ def test_status() -> None:
     assert data["environment"] == "sre_env"
     assert "progress" in data
     assert "grader" in data
+
+
+def test_unified_tasks() -> None:
+    response = client.get("/unified-tasks")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["environment"] == "sre_env"
+    assert len(data["scenarios"]) == 3
+
+
+def test_phase2_baseline() -> None:
+    response = client.get("/phase2-baseline")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["baselines"]) == 3

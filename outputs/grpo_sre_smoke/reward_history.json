@@ -1,0 +1,55 @@
+{
+  "mode": "fewshot_trajectory_learning",
+  "provider": "heuristic",
+  "model": "qwen2.5:7b",
+  "difficulty": "easy",
+  "steps": 1,
+  "group_size": 2,
+  "best_reward": 2.5235000000000003,
+  "best_score": 1.0,
+  "memory_stats": {
+    "easy_001": {
+      "count": 2,
+      "best_reward": 2.5235000000000003,
+      "best_score": 1.0,
+      "avg_reward": 2.5235000000000003
+    }
+  },
+  "history": [
+    {
+      "step": 1,
+      "avg_reward": 2.5,
+      "best_reward": 2.5,
+      "best_score": 1.0,
+      "success_rate": 1.0
+    },
+    {
+      "step": 1,
+      "avg_reward": 2.5,
+      "best_reward": 2.5,
+      "best_score": 1.0,
+      "success_rate": 1.0
+    },
+    {
+      "step": 1,
+      "avg_reward": 2.5,
+      "best_reward": 2.5,
+      "best_score": 1.0,
+      "success_rate": 1.0
+    },
+    {
+      "step": 1,
+      "avg_reward": 2.5,
+      "best_reward": 2.5,
+      "best_score": 1.0,
+      "success_rate": 1.0
+    },
+    {
+      "step": 1,
+      "avg_reward": 2.5235000000000003,
+      "best_reward": 2.5235000000000003,
+      "best_score": 1.0,
+      "success_rate": 1.0
+    }
+  ]
+}

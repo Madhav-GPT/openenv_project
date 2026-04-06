@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from openenv.core import Action, Observation, State
 from pydantic import BaseModel, ConfigDict, Field
@@ -17,6 +17,10 @@ ToolName = Literal[
     "restart",
     "scale",
     "rollback",
+    "classify_vuln",
+    "apply_patch",
+    "verify_patch",
+    "post_mortem",
 ]
 Difficulty = Literal["easy", "medium", "hard"]
 Version = Literal["previous", "stable"]
@@ -28,7 +32,10 @@ class SREAction(Action):
     model_config = ConfigDict(extra="forbid")
 
     tool: ToolName = Field(description="Which tool to use.")
-    service: ServiceName = Field(description="Which service to target.")
+    service: ServiceName | None = Field(
+        default=None,
+        description="Required for service-targeting tools such as restart/get_logs.",
+    )
     metric: MetricName | None = Field(
         default=None,
         description="Required for get_metrics. Which metric to query.",
@@ -42,6 +49,30 @@ class SREAction(Action):
     version: Version | None = Field(
         default=None,
         description="Required for rollback. Which version to roll back to.",
+    )
+    vulnerability_type: str | None = Field(
+        default=None,
+        description="For classify_vuln. Example: 'sql_injection' or 'xss'.",
+    )
+    patch_id: str | None = Field(
+        default=None,
+        description="For apply_patch. Example: 'parameterized_query'.",
+    )
+    root_cause: str | None = Field(
+        default=None,
+        description="For post_mortem. Human-readable root cause summary.",
+    )
+    attack_vector: str | None = Field(
+        default=None,
+        description="For post_mortem. Human-readable attack vector summary.",
+    )
+    fix_sequence: list[str] | None = Field(
+        default=None,
+        description="For post_mortem. Ordered list of remediation steps taken.",
+    )
+    prevention: str | None = Field(
+        default=None,
+        description="For post_mortem. Prevention or follow-up actions.",
     )
 
 
@@ -97,6 +128,42 @@ class SREObservation(Observation):
     failure_reason: str | None = Field(default=None)
     reward: float = Field(default=0.0)
     done: bool = Field(default=False)
+    phase: str = Field(
+        default="Phase 1: Infrastructure Triage",
+        description="Current phase label for the unified environment.",
+    )
+    phase2_unlocked: bool = Field(
+        default=False,
+        description="True once the security indicator has been discovered in logs.",
+    )
+    phase2_complete: bool = Field(
+        default=False,
+        description="True once the security fix has been correctly verified.",
+    )
+    security_sub_quest: dict[str, Any] | None = Field(
+        default=None,
+        description="Security task data revealed after the unlock condition is met.",
+    )
+    websec_state: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Security-subquest progress such as classification or patch status.",
+    )
+    postmortem_submitted: bool = Field(
+        default=False,
+        description="True once a post_mortem action has been submitted.",
+    )
+    postmortem_available: bool = Field(
+        default=False,
+        description="True from tick 5 onward in the unified environment.",
+    )
+    final_score: float = Field(
+        default=0.0,
+        description="Normalized 0.0-1.0 episode score once grading is available.",
+    )
+    phase_scores: dict[str, float] = Field(
+        default_factory=dict,
+        description="Per-phase score breakdown for infrastructure, security, and postmortem.",
+    )
 
 
 class SREState(State):
@@ -117,6 +184,11 @@ class SREState(State):
     correct_fixes_applied: int
     all_services_healthy: bool
     episode_complete: bool
+    phase2_unlocked: bool = False
+    phase2_complete: bool = False
+    postmortem_submitted: bool = False
+    postmortem_score: float = 0.0
+    final_score: float = 0.0
 
 
 class ScenarioSummary(BaseModel):
@@ -163,7 +235,7 @@ class BaselineStep(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     tool: ToolName
-    service: ServiceName
+    service: ServiceName | None = None
     metric: MetricName | None = None
     replicas: int | None = None
     version: Version | None = None

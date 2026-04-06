@@ -3,7 +3,6 @@
 
 Default behavior is ``auto``:
 - Prefer local Ollama with ``qwen2.5:7b`` if available.
-- Fall back to Groq if configured.
 - Fall back to a deterministic heuristic policy otherwise.
 """
 
@@ -15,6 +14,7 @@ from typing import Any
 
 from sre_env.client import SREEnv
 from sre_env.models import SREAction
+from sre_env.scripts.benchmark_policies import OPTIMAL_ACTIONS
 from sre_env.scripts.live_dashboard import BaselineDashboard
 from sre_env.scripts.llm_backends import (
     DEFAULT_OLLAMA_HOST,
@@ -37,6 +37,10 @@ AVAILABLE TOOLS (respond with JSON only):
   {"tool": "restart", "service": "<name>"}
   {"tool": "scale", "service": "<name>", "replicas": <1-5>}
   {"tool": "rollback", "service": "<name>", "version": "previous"}
+  {"tool": "classify_vuln", "vulnerability_type": "<sql_injection|xss|broken_auth>"}
+  {"tool": "apply_patch", "patch_id": "<scenario-specific patch id>"}
+  {"tool": "verify_patch"}
+  {"tool": "post_mortem", "root_cause": "...", "attack_vector": "...", "fix_sequence": ["..."], "prevention": "..."}
 
 Investigate before fixing. Fix the root cause first. Respond with valid JSON only.
 """
@@ -49,11 +53,14 @@ def _action_key(action: dict[str, Any]) -> tuple[Any, ...]:
         action.get("metric"),
         action.get("replicas"),
         action.get("version"),
+        action.get("vulnerability_type"),
+        action.get("patch_id"),
     )
 
 
 def _build_user_message(observation: dict[str, Any]) -> str:
     lines = [f"TICK {observation['tick']}/{observation['max_ticks']}"]
+    lines.append(f"PHASE: {observation.get('phase', 'Phase 1')}")
     lines.append("ACTIVE ALERTS:")
     alerts = observation.get("active_alerts", [])
     if alerts:
@@ -73,6 +80,12 @@ def _build_user_message(observation: dict[str, Any]) -> str:
         lines.append(f"LAST RESULT: {observation['last_action_result']}")
     if observation.get("tool_output"):
         lines.append(f"TOOL OUTPUT: {observation['tool_output']}")
+    if observation.get("security_sub_quest"):
+        lines.append(
+            f"SECURITY SUB-QUEST: {observation['security_sub_quest'].get('task_id', 'unknown')}"
+        )
+    if observation.get("postmortem_available"):
+        lines.append("POST_MORTEM AVAILABLE")
     lines.append("What is the next action? JSON only.")
     return "\n".join(lines)
 
@@ -83,28 +96,12 @@ def _heuristic_action(
 ) -> dict[str, Any]:
     seen = {_action_key(action) for action in history}
     difficulty = observation["difficulty"]
-
-    if difficulty == "easy":
-        if ("get_logs", "database", None, None, None) not in seen:
-            return {"tool": "get_logs", "service": "database"}
-        return {"tool": "restart", "service": "database"}
-
-    if difficulty == "medium":
-        sequence = [
-            {"tool": "get_logs", "service": "cache"},
-            {"tool": "get_logs", "service": "api-gateway"},
-            {"tool": "restart", "service": "cache"},
-            {"tool": "restart", "service": "database"},
-        ]
-    else:
-        sequence = [
-            {"tool": "get_metrics", "service": "worker", "metric": "memory"},
-            {"tool": "get_logs", "service": "worker"},
-            {"tool": "get_logs", "service": "database"},
-            {"tool": "rollback", "service": "worker", "version": "previous"},
-            {"tool": "restart", "service": "database"},
-            {"tool": "restart", "service": "api-gateway"},
-        ]
+    scenario_id = {"easy": "easy_001", "medium": "medium_001", "hard": "hard_001"}[
+        difficulty
+    ]
+    sequence = [
+        action.model_dump(exclude_none=True) for action in OPTIMAL_ACTIONS[scenario_id]
+    ]
 
     for action in sequence:
         if _action_key(action) not in seen:
@@ -179,7 +176,7 @@ def main() -> None:
     parser.add_argument(
         "--provider",
         default="auto",
-        choices=["auto", "ollama", "groq", "heuristic"],
+        choices=["auto", "ollama", "heuristic"],
     )
     parser.add_argument("--model", default=DEFAULT_OLLAMA_MODEL)
     parser.add_argument("--ollama-host", default=DEFAULT_OLLAMA_HOST)

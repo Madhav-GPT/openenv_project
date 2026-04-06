@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from typing import Any
 
 from fastapi import HTTPException
 from openenv.core.env_server import create_app
@@ -20,20 +21,24 @@ from .challenge import (
     current_runtime_progress,
     grade_episode,
     list_baselines,
+    list_phase2_baselines,
     list_scenarios,
+    list_unified_scenarios,
     set_runtime_progress,
 )
-from .environment import SREEnvironment
+from .unified_environment import UnifiedSREEnvironment
 
-_BOOTSTRAP_ENV = SREEnvironment()
+_BOOTSTRAP_ENV = UnifiedSREEnvironment()
 set_runtime_progress(_BOOTSTRAP_ENV.state.model_dump())
 app = create_app(
-    lambda: SREEnvironment(),
+    lambda: UnifiedSREEnvironment(),
     SREAction,
     SREObservation,
     env_name="sre_env",
     max_concurrent_envs=1,
 )
+app.title = "SRE-Env Incident Response Commander"
+app.version = "2.0.0"
 app.router.routes = [
     route
     for route in app.router.routes
@@ -77,9 +82,31 @@ def status() -> RuntimeStatus:
     )
 
 
+@app.get("/unified-tasks", tags=["phase2"])
+def unified_tasks(difficulty: str | None = None) -> dict[str, Any]:
+    try:
+        return list_unified_scenarios(difficulty=difficulty)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/phase2-baseline", tags=["phase2"])
+def phase2_baseline(scenario_id: str | None = None) -> dict[str, Any]:
+    try:
+        return list_phase2_baselines(scenario_id=scenario_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @app.get("/health", tags=["challenge"])
-def health() -> dict[str, str]:
-    return {"status": "ok", "environment": "sre_env", "version": "1.0.0"}
+def health() -> dict[str, Any]:
+    return {
+        "status": "healthy",
+        "environment": "sre_env",
+        "version": "2.0.0",
+        "phases": ["infrastructure", "security", "post_mortem"],
+        "difficulties": {"easy": 15, "medium": 20, "hard": 25},
+    }
 
 
 def serve(host: str = "0.0.0.0", port: int = 8000) -> None:

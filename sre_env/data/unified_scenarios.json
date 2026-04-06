@@ -1,0 +1,835 @@
+{
+  "scenarios": [
+    {
+      "id": "easy_001",
+      "difficulty": "easy",
+      "difficulty_max_ticks": 15,
+      "name": "Database OOM Crash",
+      "description": "The database process ran out of memory and crashed. api-gateway throws 502s. Root cause: SQL injection attack caused DROP TABLE command that triggered OOM.",
+      "root_cause_service": "database",
+      "correct_fix_sequence": [
+        {
+          "tool": "restart",
+          "service": "database"
+        }
+      ],
+      "trap_actions": [
+        {
+          "action": {
+            "tool": "restart",
+            "service": "api-gateway"
+          },
+          "result": "api-gateway restarted but 502 errors continue. The database is still down - the problem is upstream of api-gateway."
+        },
+        {
+          "action": {
+            "tool": "restart",
+            "service": "cache"
+          },
+          "result": "cache restarted but 502 errors continue. The database is still crashed."
+        },
+        {
+          "action": {
+            "tool": "scale",
+            "service": "api-gateway",
+            "replicas": 3
+          },
+          "result": "api-gateway scaled to 3 replicas but 502s continue at same rate. Database is still down - scaling the gateway does not help when upstream is dead."
+        }
+      ],
+      "initial_state": {
+        "api-gateway": {
+          "status": "degraded",
+          "cpu_pct": 45,
+          "memory_pct": 30,
+          "error_rate_pct": 48,
+          "latency_ms": 2800,
+          "replicas": 1
+        },
+        "cache": {
+          "status": "healthy",
+          "cpu_pct": 12,
+          "memory_pct": 20,
+          "error_rate_pct": 0,
+          "latency_ms": 4,
+          "replicas": 1
+        },
+        "database": {
+          "status": "crashed",
+          "cpu_pct": 0,
+          "memory_pct": 0,
+          "error_rate_pct": 100,
+          "latency_ms": 0,
+          "replicas": 1
+        },
+        "worker": {
+          "status": "healthy",
+          "cpu_pct": 8,
+          "memory_pct": 15,
+          "error_rate_pct": 0,
+          "latency_ms": 120,
+          "replicas": 1
+        }
+      },
+      "initial_alerts": [
+        {
+          "service": "api-gateway",
+          "severity": "critical",
+          "message": "HTTP 502 error rate at 48% - upstream connection refused",
+          "active": true
+        },
+        {
+          "service": "database",
+          "severity": "critical",
+          "message": "Process not responding - last seen 4 minutes ago",
+          "active": true
+        }
+      ],
+      "logs": {
+        "api-gateway": "2025-01-15 03:41:02 ERROR upstream connect error or disconnect/reset before headers\n2025-01-15 03:41:03 ERROR connect() failed (111: Connection refused) to database:5432\n2025-01-15 03:41:05 ERROR 502 Bad Gateway [database pool exhausted]\n2025-01-15 03:40:59 ERROR database:5432 connection timed out after 5000ms",
+        "cache": "2025-01-15 03:41:00 INFO PING received - PONG sent\n2025-01-15 03:40:55 INFO SET user:session:4429 TTL=3600\n2025-01-15 03:40:52 INFO Memory usage: 204MB / 1024MB (20%)\n2025-01-15 03:40:50 INFO Active connections: 12",
+        "database": "2025-01-15 03:38:01 ERROR OutOfMemoryError: cannot allocate 524288 bytes - Killed\n2025-01-15 03:38:00 WARN Shared buffers at 98% capacity\n2025-01-15 03:37:58 WARN Memory pressure detected - 1024MB / 1024MB used\n2025-01-15 03:37:55 INFO Checkpoint starting: write\n2025-01-15 03:37:50 SECURITY_ALERT: Unusual query detected - DROP TABLE users; -- executed via login handler at 03:37:48\n2025-01-15 03:37:48 INFO Connection from api-gateway:52441\n[process terminated - no further logs]",
+        "worker": "2025-01-15 03:41:00 INFO Job queue poll - 0 items pending\n2025-01-15 03:40:55 INFO Heartbeat OK\n2025-01-15 03:40:50 INFO Job completed: send_email id=9912 in 340ms"
+      },
+      "metrics": {
+        "api-gateway": {
+          "cpu": "cpu=45% (elevated - processing error responses)",
+          "memory": "memory=30% (1.2GB/4GB - normal)",
+          "latency": "p50=2800ms p95=8200ms p99=timeout - CRITICAL. Spike at 03:38:02 matches database outage.",
+          "error_rate": "error_rate=48% - 502s began at 03:38:02 exactly when database went down.",
+          "throughput": "throughput=210 req/s (50% of normal - half traffic rejected)"
+        },
+        "cache": {
+          "cpu": "cpu=12% (normal)",
+          "memory": "memory=20% (204MB/1024MB - healthy)",
+          "latency": "p50=4ms p95=8ms - healthy",
+          "error_rate": "error_rate=0%",
+          "throughput": "throughput=1800 ops/s (normal)"
+        },
+        "database": {
+          "cpu": "cpu=0% - process NOT running (OOM killed at 03:38:01)",
+          "memory": "memory=0% - process NOT running",
+          "latency": "latency=N/A - process NOT running",
+          "error_rate": "error_rate=100% - ECONNREFUSED on all attempts",
+          "throughput": "throughput=0 queries/s"
+        },
+        "worker": {
+          "cpu": "cpu=8% (light - no database jobs available)",
+          "memory": "memory=15% (600MB/4GB - healthy)",
+          "latency": "job_duration_avg=N/A - idle (database unreachable)",
+          "error_rate": "error_rate=0%",
+          "throughput": "throughput=0 jobs/min"
+        }
+      },
+      "dependencies": {
+        "api-gateway": "depends_on: [cache, database]. Cache-aside pattern. With database DOWN, 48% of requests fail.",
+        "cache": "depends_on: []. Standalone. Currently healthy.",
+        "database": "depends_on: []. Primary store. OOM-killed at 03:38:01. Needs restart.",
+        "worker": "depends_on: [database]. Background processor. Idle - database unreachable."
+      },
+      "resolution": {
+        "restart_database": {
+          "trigger": {
+            "tool": "restart",
+            "service": "database"
+          },
+          "message": "database process restarted. Memory cleared. Connection pool healthy. api-gateway 502 errors dropping.",
+          "final_state": {
+            "api-gateway": {
+              "status": "healthy",
+              "cpu_pct": 22,
+              "memory_pct": 30,
+              "error_rate_pct": 0,
+              "latency_ms": 45,
+              "replicas": 1
+            },
+            "cache": {
+              "status": "healthy",
+              "cpu_pct": 12,
+              "memory_pct": 20,
+              "error_rate_pct": 0,
+              "latency_ms": 4,
+              "replicas": 1
+            },
+            "database": {
+              "status": "healthy",
+              "cpu_pct": 18,
+              "memory_pct": 35,
+              "error_rate_pct": 0,
+              "latency_ms": 12,
+              "replicas": 1
+            },
+            "worker": {
+              "status": "healthy",
+              "cpu_pct": 8,
+              "memory_pct": 15,
+              "error_rate_pct": 0,
+              "latency_ms": 890,
+              "replicas": 1
+            }
+          }
+        }
+      },
+      "security_trigger_log_service": "database",
+      "security_indicator_string": "SECURITY_ALERT",
+      "security_sub_quest": {
+        "task_id": "sqli_login",
+        "hint": "SECURITY_ALERT found in database logs: DROP TABLE users via login handler. A SQL injection vulnerability allowed this attack.",
+        "scanner_hint": "String concatenation in SQL query - user input not sanitized. Classic SQL injection pattern.",
+        "code_snippet": "def login(username, password):\n    query = \"SELECT id FROM users WHERE username='\" + username + \"' AND password='\" + password + \"'\"\n    return db.execute(query).fetchone()",
+        "correct_vulnerability": "sql_injection",
+        "correct_patch": "parameterized_query",
+        "patch_options": [
+          "parameterized_query",
+          "strip_quotes",
+          "disable_login"
+        ],
+        "patch_descriptions": {
+          "parameterized_query": "Use ? placeholders with bound parameters - prevents injection entirely",
+          "strip_quotes": "Remove quote characters from input - bypassable, incomplete fix",
+          "disable_login": "Disable login endpoint - blocks attack but breaks application"
+        },
+        "infrastructure_clue": "SQL injection confirmed as attack vector. The DROP TABLE command caused the OOM crash. You can now safely restart the database - the vulnerability is patched so it will not be exploited again."
+      },
+      "postmortem_correct_keywords": {
+        "root_cause": [
+          "database",
+          "oom",
+          "memory",
+          "sql",
+          "injection",
+          "drop table"
+        ],
+        "attack_vector": [
+          "sql injection",
+          "sqli",
+          "login",
+          "unsanitized",
+          "concatenation"
+        ],
+        "prevention": [
+          "parameterized",
+          "prepared statement",
+          "bind",
+          "sanitize",
+          "waf"
+        ]
+      }
+    },
+    {
+      "id": "medium_001",
+      "difficulty": "medium",
+      "difficulty_max_ticks": 20,
+      "name": "Cache Failure Cascade",
+      "description": "Cache OOM-killed. api-gateway bypasses cache, floods database. Trap: fixing database without fixing cache causes immediate re-overload. Security root cause: XSS attack stole admin session, which was used to flush the cache config.",
+      "root_cause_service": "cache",
+      "correct_fix_sequence": [
+        {
+          "tool": "restart",
+          "service": "cache"
+        },
+        {
+          "tool": "restart",
+          "service": "database"
+        }
+      ],
+      "trap_actions": [
+        {
+          "action": {
+            "tool": "restart",
+            "service": "database"
+          },
+          "result": "database restarted but overloaded again within 30 seconds. Cache is still down - api-gateway generates 8x normal database load. Fix the cache FIRST."
+        },
+        {
+          "action": {
+            "tool": "scale",
+            "service": "database",
+            "replicas": 3
+          },
+          "result": "database scaled to 3 replicas but still overloaded. With cache down, volume exceeds even 3 replicas. Restore cache first."
+        },
+        {
+          "action": {
+            "tool": "scale",
+            "service": "api-gateway",
+            "replicas": 1
+          },
+          "result": "api-gateway already at 1 replica. No change. The problem is not traffic volume - it is cache bypass."
+        }
+      ],
+      "initial_state": {
+        "api-gateway": {
+          "status": "degraded",
+          "cpu_pct": 71,
+          "memory_pct": 45,
+          "error_rate_pct": 35,
+          "latency_ms": 3200,
+          "replicas": 1
+        },
+        "cache": {
+          "status": "crashed",
+          "cpu_pct": 0,
+          "memory_pct": 0,
+          "error_rate_pct": 100,
+          "latency_ms": 0,
+          "replicas": 1
+        },
+        "database": {
+          "status": "overloaded",
+          "cpu_pct": 94,
+          "memory_pct": 88,
+          "error_rate_pct": 35,
+          "latency_ms": 4200,
+          "replicas": 1
+        },
+        "worker": {
+          "status": "degraded",
+          "cpu_pct": 20,
+          "memory_pct": 22,
+          "error_rate_pct": 40,
+          "latency_ms": 8900,
+          "replicas": 1
+        }
+      },
+      "initial_alerts": [
+        {
+          "service": "cache",
+          "severity": "critical",
+          "message": "Service unreachable - health check failing for 8 minutes",
+          "active": true
+        },
+        {
+          "service": "database",
+          "severity": "critical",
+          "message": "CPU at 94% - connection queue backed up (1240 waiting)",
+          "active": true
+        },
+        {
+          "service": "api-gateway",
+          "severity": "warning",
+          "message": "Latency p95 > 3s - degraded but still serving",
+          "active": true
+        },
+        {
+          "service": "worker",
+          "severity": "warning",
+          "message": "Job queue growing - database too slow (847 pending)",
+          "active": true
+        }
+      ],
+      "logs": {
+        "api-gateway": "2025-01-15 04:12:01 WARN cache HIT ratio: 0% - cache unreachable, ALL requests falling through to database\n2025-01-15 04:12:00 ERROR cache:6379 connection refused - bypassing cache, querying database directly\n2025-01-15 04:11:58 WARN database response time 4200ms (threshold: 500ms)\n2025-01-15 04:11:52 WARN database connection pool: 95/100 connections used",
+        "cache": "2025-01-15 04:04:10 ERROR SIGKILL received - out of memory\n2025-01-15 04:04:08 WARN Memory at 99% - eviction failing (maxmemory-policy=noeviction)\n2025-01-15 04:04:05 ERROR Cannot allocate memory for new keys\n2025-01-15 04:04:00 INFO Memory: 1023MB / 1024MB used\n2025-01-15 04:03:55 SECURITY_ALERT: Admin cache config endpoint called from unusual IP 10.0.0.99 - cache maxmemory set to 1024MB with noeviction (was: 512MB with allkeys-lru). Admin session token: eyJhbGc... (XSS-stolen session)\n[process terminated by OOM killer]",
+        "database": "2025-01-15 04:12:02 WARN Too many connections: 1240 queued (max: 100 active)\n2025-01-15 04:12:01 WARN CPU load 94% - query planner degraded\n2025-01-15 04:11:59 ERROR query timeout after 5000ms\n2025-01-15 04:11:55 WARN Autovacuum blocked - CPU too high",
+        "worker": "2025-01-15 04:12:00 WARN Job queue depth: 847 pending (normal: <50)\n2025-01-15 04:11:55 ERROR Job id=10441 failed - database query timeout\n2025-01-15 04:11:50 WARN database response latency 8900ms - jobs critically slow"
+      },
+      "metrics": {
+        "cache": {
+          "cpu": "cpu=0% - process NOT running (OOM killed 8 min ago)",
+          "memory": "memory=0% - process NOT running",
+          "latency": "latency=N/A - DOWN",
+          "error_rate": "error_rate=100%",
+          "throughput": "throughput=0 ops/s"
+        },
+        "database": {
+          "cpu": "cpu=94% - CRITICAL. Sustained 7 minutes.",
+          "memory": "memory=88% (7GB/8GB) - near limit from connection overhead",
+          "latency": "p50=4200ms p95=9800ms p99=timeout - severe",
+          "error_rate": "error_rate=35% - query timeouts under extreme load",
+          "throughput": "throughput=1240 connections queued - 8x NORMAL LOAD because cache bypassed"
+        },
+        "api-gateway": {
+          "cpu": "cpu=71% - elevated (cache fallthrough logic)",
+          "memory": "memory=45%",
+          "latency": "p50=3200ms p95=7100ms",
+          "error_rate": "error_rate=35%",
+          "throughput": "throughput=420 req/s - full load, 0% cache HIT"
+        },
+        "worker": {
+          "cpu": "cpu=20%",
+          "memory": "memory=22%",
+          "latency": "job_duration_avg=8900ms (normal: 890ms) - 10x slowdown",
+          "error_rate": "error_rate=40%",
+          "throughput": "throughput=0.4 jobs/min (normal: 4)"
+        }
+      },
+      "dependencies": {
+        "api-gateway": "depends_on: [cache, database]. Cache-aside: check cache first, fall through to database on MISS. With cache DOWN, 100% of GET requests hit database - 8x normal load.",
+        "cache": "depends_on: []. Standalone. OOM killed 8 minutes ago. THIS IS ROOT CAUSE - its absence creates the database overload cascade.",
+        "database": "depends_on: []. Receiving 8x normal query volume. Victim of cache failure, not root cause.",
+        "worker": "depends_on: [database]. Background processor. Degraded because database is overloaded."
+      },
+      "resolution": {
+        "step1_restart_cache": {
+          "trigger": {
+            "tool": "restart",
+            "service": "cache"
+          },
+          "message": "cache restarted. HIT ratio recovering (currently 45%, rising). database load dropping as cache absorbs traffic.",
+          "intermediate_state": {
+            "api-gateway": {
+              "status": "degraded",
+              "cpu_pct": 45,
+              "memory_pct": 38,
+              "error_rate_pct": 12,
+              "latency_ms": 1200,
+              "replicas": 1
+            },
+            "cache": {
+              "status": "healthy",
+              "cpu_pct": 15,
+              "memory_pct": 10,
+              "error_rate_pct": 0,
+              "latency_ms": 3,
+              "replicas": 1
+            },
+            "database": {
+              "status": "overloaded",
+              "cpu_pct": 75,
+              "memory_pct": 70,
+              "error_rate_pct": 20,
+              "latency_ms": 2100,
+              "replicas": 1
+            },
+            "worker": {
+              "status": "degraded",
+              "cpu_pct": 20,
+              "memory_pct": 22,
+              "error_rate_pct": 15,
+              "latency_ms": 3200,
+              "replicas": 1
+            }
+          }
+        },
+        "step2_restart_database": {
+          "trigger": {
+            "tool": "restart",
+            "service": "database"
+          },
+          "message": "database restarted. Connection queue cleared. All services healthy.",
+          "final_state": {
+            "api-gateway": {
+              "status": "healthy",
+              "cpu_pct": 25,
+              "memory_pct": 32,
+              "error_rate_pct": 0,
+              "latency_ms": 55,
+              "replicas": 1
+            },
+            "cache": {
+              "status": "healthy",
+              "cpu_pct": 15,
+              "memory_pct": 10,
+              "error_rate_pct": 0,
+              "latency_ms": 3,
+              "replicas": 1
+            },
+            "database": {
+              "status": "healthy",
+              "cpu_pct": 22,
+              "memory_pct": 40,
+              "error_rate_pct": 0,
+              "latency_ms": 14,
+              "replicas": 1
+            },
+            "worker": {
+              "status": "healthy",
+              "cpu_pct": 18,
+              "memory_pct": 22,
+              "error_rate_pct": 0,
+              "latency_ms": 910,
+              "replicas": 1
+            }
+          }
+        }
+      },
+      "security_trigger_log_service": "cache",
+      "security_indicator_string": "SECURITY_ALERT",
+      "security_sub_quest": {
+        "task_id": "xss_comments",
+        "hint": "SECURITY_ALERT in cache logs: admin session stolen via XSS was used to modify cache config. XSS in comment renderer is the attack vector.",
+        "scanner_hint": "Comment text rendered into HTML without escaping - attacker injected script to steal admin cookie.",
+        "code_snippet": "def render_comment(comment):\n    return f'<div class=\"comment\">{comment}</div>'",
+        "correct_vulnerability": "xss",
+        "correct_patch": "html_escape",
+        "patch_options": [
+          "html_escape",
+          "remove_script_substring",
+          "disable_comments"
+        ],
+        "patch_descriptions": {
+          "html_escape": "Escape HTML characters before rendering - safe, preserves content",
+          "remove_script_substring": "Strip 'script' substring - bypassable with alternate payloads",
+          "disable_comments": "Remove comment feature entirely - safe but breaks functionality"
+        },
+        "infrastructure_clue": "XSS confirmed. Attacker stole admin session via malicious comment, used it to set cache maxmemory=noeviction causing OOM. Patch in place. You can now safely restart cache - it will start with correct default config."
+      },
+      "postmortem_correct_keywords": {
+        "root_cause": [
+          "cache",
+          "oom",
+          "memory",
+          "eviction",
+          "xss",
+          "session",
+          "admin"
+        ],
+        "attack_vector": [
+          "xss",
+          "cross-site scripting",
+          "comment",
+          "session",
+          "cookie",
+          "stolen"
+        ],
+        "prevention": [
+          "html escape",
+          "sanitize",
+          "csp",
+          "httponly",
+          "session expiry",
+          "mfa"
+        ]
+      }
+    },
+    {
+      "id": "hard_001",
+      "difficulty": "hard",
+      "difficulty_max_ticks": 25,
+      "name": "Bad Deploy - Memory Leak Cascade",
+      "description": "worker v2.4.1 has unbounded connection pool bug causing memory leak and database corruption. Trap: fixing database first causes immediate re-corruption. Security root cause: broken auth on /admin let attacker trigger the bad deployment.",
+      "root_cause_service": "worker",
+      "correct_fix_sequence": [
+        {
+          "tool": "rollback",
+          "service": "worker",
+          "version": "previous"
+        },
+        {
+          "tool": "restart",
+          "service": "database"
+        },
+        {
+          "tool": "restart",
+          "service": "api-gateway"
+        }
+      ],
+      "trap_actions": [
+        {
+          "action": {
+            "tool": "restart",
+            "service": "database"
+          },
+          "result": "database restarted but worker (still v2.4.1) immediately reconnects and begins leaking connections again. Database degrades again within 2 minutes. Rollback worker FIRST."
+        },
+        {
+          "action": {
+            "tool": "restart",
+            "service": "api-gateway"
+          },
+          "result": "api-gateway restarted but 503s continue. Database still corrupted by worker. api-gateway is victim, not cause."
+        },
+        {
+          "action": {
+            "tool": "rollback",
+            "service": "database",
+            "version": "previous"
+          },
+          "result": "database has no deployable previous version - it was not recently deployed. Nothing changed."
+        },
+        {
+          "action": {
+            "tool": "rollback",
+            "service": "api-gateway",
+            "version": "previous"
+          },
+          "result": "api-gateway has no recent deployment to roll back. Nothing changed."
+        },
+        {
+          "action": {
+            "tool": "scale",
+            "service": "worker",
+            "replicas": 1
+          },
+          "result": "worker already at 1 replica. Also, scaling does not fix a memory leak - it would create multiple leaking instances."
+        }
+      ],
+      "initial_state": {
+        "api-gateway": {
+          "status": "degraded",
+          "cpu_pct": 52,
+          "memory_pct": 38,
+          "error_rate_pct": 55,
+          "latency_ms": 5100,
+          "replicas": 1
+        },
+        "cache": {
+          "status": "healthy",
+          "cpu_pct": 14,
+          "memory_pct": 22,
+          "error_rate_pct": 0,
+          "latency_ms": 5,
+          "replicas": 1
+        },
+        "database": {
+          "status": "overloaded",
+          "cpu_pct": 88,
+          "memory_pct": 92,
+          "error_rate_pct": 55,
+          "latency_ms": 6800,
+          "replicas": 1
+        },
+        "worker": {
+          "status": "degraded",
+          "cpu_pct": 95,
+          "memory_pct": 97,
+          "error_rate_pct": 80,
+          "latency_ms": 0,
+          "replicas": 1
+        }
+      },
+      "initial_alerts": [
+        {
+          "service": "worker",
+          "severity": "critical",
+          "message": "Memory at 97% - OOM imminent. Deployed 90 min ago (v2.4.1). Previous stable: v2.4.0",
+          "active": true
+        },
+        {
+          "service": "database",
+          "severity": "critical",
+          "message": "Connection pool corrupted - intermittent crashes every 90 seconds",
+          "active": true
+        },
+        {
+          "service": "api-gateway",
+          "severity": "critical",
+          "message": "503 error rate 55% - database connection failures",
+          "active": true
+        },
+        {
+          "service": "worker",
+          "severity": "warning",
+          "message": "CPU 95% - almost entirely GC overhead (memory leak)",
+          "active": true
+        }
+      ],
+      "logs": {
+        "api-gateway": "2025-01-15 05:30:01 ERROR 503 Service Unavailable - database connection refused\n2025-01-15 05:30:00 WARN Database failover triggered - no healthy replica\n2025-01-15 05:29:58 ERROR connection pool exhausted - all 100 connections in error state\n2025-01-15 05:29:50 INFO Request GET /api/products - cache HIT [OK]\n2025-01-15 05:29:48 ERROR Request GET /api/user/profile - database error: connection reset",
+        "cache": "2025-01-15 05:30:00 INFO PING - PONG\n2025-01-15 05:29:55 INFO HIT ratio: 68% (normal)\n2025-01-15 05:29:50 INFO Memory: 225MB / 1024MB (22%) - healthy\n2025-01-15 05:29:45 INFO Active connections: 14 (normal)",
+        "database": "2025-01-15 05:30:02 ERROR connection reset: worker-service:44921 sent malformed packet - pool entry corrupted\n2025-01-15 05:30:00 WARN 32/100 connections in error state (corrupted by worker)\n2025-01-15 05:29:55 WARN Memory pressure from worker connection leak: 7.3GB/8GB\n2025-01-15 05:29:45 ERROR worker-service connection pool leak - connections not released after jobs\n2025-01-15 05:28:00 WARN worker-service holding 68 persistent connections (normal: 5-10)",
+        "worker": "2025-01-15 05:30:01 ERROR java.lang.OutOfMemoryError: Java heap space\n2025-01-15 05:30:00 WARN Heap: 7.76GB / 8GB (97%)\n2025-01-15 05:29:55 WARN GC overhead limit exceeded - 98% CPU in garbage collection\n2025-01-15 05:29:50 WARN Connection leak: 68 database connections open (not released)\n2025-01-15 05:29:00 INFO [v2.4.1] Connection pool initialized with unbounded size - BUG introduced in this version\n2025-01-15 04:00:01 INFO [v2.4.1] worker-service started - NEW DEPLOYMENT 90 MINUTES AGO\n2025-01-15 04:00:00 SECURITY_ALERT: Deployment triggered by admin user from IP 10.0.0.99 via /admin/deploy endpoint. Auth check: passed (role=user, should require role=admin). Broken access control - non-admin triggered production deployment."
+      },
+      "metrics": {
+        "worker": {
+          "cpu": "cpu=95% - CRITICAL. Almost 100% GC overhead.",
+          "memory": "memory=97% (7.76GB/8GB) - OOM imminent. Growing +50MB/minute since v2.4.1 deployed 90 min ago.",
+          "latency": "job_duration_avg=N/A - jobs failing before completion",
+          "error_rate": "error_rate=80%",
+          "throughput": "throughput=0 jobs/min. DEPLOYED VERSION: v2.4.1 (90 min ago). PREVIOUS STABLE: v2.4.0"
+        },
+        "database": {
+          "cpu": "cpu=88% - elevated from malformed packet processing",
+          "memory": "memory=92% (7.3GB/8GB) - elevated from worker connection leak",
+          "latency": "p50=6800ms p95=timeout",
+          "error_rate": "error_rate=55%",
+          "throughput": "throughput=32% of connections corrupted"
+        },
+        "api-gateway": {
+          "cpu": "cpu=52% - normal",
+          "memory": "memory=38%",
+          "latency": "p50=5100ms p95=timeout",
+          "error_rate": "error_rate=55% - all errors trace to database failures",
+          "throughput": "throughput=190 req/s (55% of normal). Cache HIT ratio=68% - only DB-dependent requests fail."
+        },
+        "cache": {
+          "cpu": "cpu=14% - healthy",
+          "memory": "memory=22% - healthy",
+          "latency": "p50=5ms - healthy",
+          "error_rate": "error_rate=0%",
+          "throughput": "throughput=1650 ops/s - healthy"
+        }
+      },
+      "dependencies": {
+        "api-gateway": "depends_on: [cache, database]. Cache working fine (68% HIT). All database-dependent requests failing.",
+        "cache": "depends_on: []. Healthy. Not the problem.",
+        "database": "depends_on: []. Receiving malformed connection packets from worker v2.4.1. 32% pool entries corrupt. Needs restart AFTER worker rolled back.",
+        "worker": "depends_on: [database]. VERSION v2.4.1 HAS UNBOUNDED CONNECTION POOL BUG. Holding 68 persistent DB connections. Memory leak +50MB/min. MUST BE ROLLED BACK TO v2.4.0."
+      },
+      "resolution": {
+        "step1_rollback_worker": {
+          "trigger": {
+            "tool": "rollback",
+            "service": "worker",
+            "version": "previous"
+          },
+          "message": "worker rolled back to v2.4.0. Memory leak stopped. Connection leak stopped. Database no longer receiving malformed packets. Database still needs restart to clear corrupted pool entries.",
+          "intermediate_state": {
+            "api-gateway": {
+              "status": "degraded",
+              "cpu_pct": 52,
+              "memory_pct": 38,
+              "error_rate_pct": 45,
+              "latency_ms": 4200,
+              "replicas": 1
+            },
+            "cache": {
+              "status": "healthy",
+              "cpu_pct": 14,
+              "memory_pct": 22,
+              "error_rate_pct": 0,
+              "latency_ms": 5,
+              "replicas": 1
+            },
+            "database": {
+              "status": "overloaded",
+              "cpu_pct": 70,
+              "memory_pct": 75,
+              "error_rate_pct": 40,
+              "latency_ms": 3200,
+              "replicas": 1
+            },
+            "worker": {
+              "status": "healthy",
+              "cpu_pct": 8,
+              "memory_pct": 15,
+              "error_rate_pct": 0,
+              "latency_ms": 920,
+              "replicas": 1
+            }
+          }
+        },
+        "step2_restart_database": {
+          "trigger": {
+            "tool": "restart",
+            "service": "database"
+          },
+          "message": "database restarted. Connection pool cleared. Error rate dropping on api-gateway.",
+          "intermediate_state": {
+            "api-gateway": {
+              "status": "degraded",
+              "cpu_pct": 40,
+              "memory_pct": 38,
+              "error_rate_pct": 10,
+              "latency_ms": 1200,
+              "replicas": 1
+            },
+            "cache": {
+              "status": "healthy",
+              "cpu_pct": 14,
+              "memory_pct": 22,
+              "error_rate_pct": 0,
+              "latency_ms": 5,
+              "replicas": 1
+            },
+            "database": {
+              "status": "healthy",
+              "cpu_pct": 20,
+              "memory_pct": 38,
+              "error_rate_pct": 5,
+              "latency_ms": 800,
+              "replicas": 1
+            },
+            "worker": {
+              "status": "healthy",
+              "cpu_pct": 8,
+              "memory_pct": 15,
+              "error_rate_pct": 0,
+              "latency_ms": 920,
+              "replicas": 1
+            }
+          }
+        },
+        "step3_restart_api_gateway": {
+          "trigger": {
+            "tool": "restart",
+            "service": "api-gateway"
+          },
+          "message": "api-gateway restarted. All stale connection state cleared. System fully healthy.",
+          "final_state": {
+            "api-gateway": {
+              "status": "healthy",
+              "cpu_pct": 22,
+              "memory_pct": 30,
+              "error_rate_pct": 0,
+              "latency_ms": 48,
+              "replicas": 1
+            },
+            "cache": {
+              "status": "healthy",
+              "cpu_pct": 14,
+              "memory_pct": 22,
+              "error_rate_pct": 0,
+              "latency_ms": 5,
+              "replicas": 1
+            },
+            "database": {
+              "status": "healthy",
+              "cpu_pct": 19,
+              "memory_pct": 38,
+              "error_rate_pct": 0,
+              "latency_ms": 11,
+              "replicas": 1
+            },
+            "worker": {
+              "status": "healthy",
+              "cpu_pct": 8,
+              "memory_pct": 15,
+              "error_rate_pct": 0,
+              "latency_ms": 920,
+              "replicas": 1
+            }
+          }
+        }
+      },
+      "security_trigger_log_service": "worker",
+      "security_indicator_string": "SECURITY_ALERT",
+      "security_sub_quest": {
+        "task_id": "broken_auth_admin",
+        "hint": "SECURITY_ALERT in worker logs: non-admin user triggered deployment via /admin/deploy - broken access control on admin endpoint allowed this.",
+        "scanner_hint": "Admin route checks only if user is logged in, not if user has admin role. Non-admin authenticated users can reach admin endpoints.",
+        "code_snippet": "@app.get('/admin/deploy')\ndef deploy_panel(current_user):\n    if not current_user:\n        raise UnauthorizedError()\n    # Missing: if not current_user.role == 'admin': raise ForbiddenError()\n    return trigger_deployment(request.args.get('version'))",
+        "correct_vulnerability": "broken_auth",
+        "correct_patch": "require_admin_role",
+        "patch_options": [
+          "require_admin_role",
+          "hide_admin_link",
+          "deny_all_admin"
+        ],
+        "patch_descriptions": {
+          "require_admin_role": "Check current_user.role == 'admin' server-side - correct fix",
+          "hide_admin_link": "Remove admin link from UI - security through obscurity, direct URL still works",
+          "deny_all_admin": "Block all admin routes - blocks attack but legitimate admins are locked out"
+        },
+        "infrastructure_clue": "Broken auth confirmed. Non-admin user triggered deployment of v2.4.1 via /admin/deploy. Patch applied - deploy endpoint now requires admin role. You can now safely rollback worker to v2.4.0 knowing the attacker cannot re-trigger the bad deploy."
+      },
+      "postmortem_correct_keywords": {
+        "root_cause": [
+          "worker",
+          "v2.4.1",
+          "deploy",
+          "memory leak",
+          "connection pool",
+          "unbounded"
+        ],
+        "attack_vector": [
+          "broken auth",
+          "access control",
+          "admin",
+          "non-admin",
+          "deploy endpoint",
+          "role"
+        ],
+        "prevention": [
+          "role-based",
+          "rbac",
+          "admin role",
+          "server-side auth",
+          "sign deploy",
+          "approval"
+        ]
+      }
+    }
+  ]
+}

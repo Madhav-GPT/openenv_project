@@ -1,0 +1,195 @@
+{
+  "mode": "fewshot_trajectory_learning",
+  "policies": {
+    "easy_001": [
+      {
+        "tool": "get_logs",
+        "service": "database"
+      },
+      {
+        "tool": "classify_vuln",
+        "vulnerability_type": "sql_injection"
+      },
+      {
+        "tool": "apply_patch",
+        "patch_id": "parameterized_query"
+      },
+      {
+        "tool": "verify_patch"
+      },
+      {
+        "tool": "restart",
+        "service": "database"
+      },
+      {
+        "tool": "post_mortem",
+        "root_cause": "database OOM caused by SQL injection dropping the users table",
+        "attack_vector": "sql injection in the login handler via string concatenation",
+        "fix_sequence": [
+          "parameterized query patch",
+          "database restart"
+        ],
+        "prevention": "use parameterized queries and add WAF coverage"
+      }
+    ],
+    "medium_001": [
+      {
+        "metadata": {},
+        "tool": "get_logs",
+        "service": "cache"
+      },
+      {
+        "metadata": {},
+        "tool": "get_logs",
+        "service": "api-gateway"
+      },
+      {
+        "metadata": {},
+        "tool": "classify_vuln",
+        "vulnerability_type": "xss"
+      },
+      {
+        "metadata": {},
+        "tool": "apply_patch",
+        "patch_id": "html_escape"
+      },
+      {
+        "metadata": {},
+        "tool": "verify_patch"
+      },
+      {
+        "metadata": {},
+        "tool": "restart",
+        "service": "cache"
+      },
+      {
+        "metadata": {},
+        "tool": "restart",
+        "service": "database"
+      },
+      {
+        "metadata": {},
+        "tool": "post_mortem",
+        "root_cause": "cache OOM after an XSS-stolen admin session changed cache config",
+        "attack_vector": "xss in the comment renderer stole the admin session cookie",
+        "fix_sequence": [
+          "html_escape patch",
+          "restart cache",
+          "restart database"
+        ],
+        "prevention": "escape HTML, set HttpOnly cookies, and add CSP headers"
+      }
+    ],
+    "hard_001": [
+      {
+        "metadata": {},
+        "tool": "get_metrics",
+        "service": "worker",
+        "metric": "memory"
+      },
+      {
+        "metadata": {},
+        "tool": "get_logs",
+        "service": "worker"
+      },
+      {
+        "metadata": {},
+        "tool": "get_logs",
+        "service": "database"
+      },
+      {
+        "metadata": {},
+        "tool": "classify_vuln",
+        "vulnerability_type": "broken_auth"
+      },
+      {
+        "metadata": {},
+        "tool": "apply_patch",
+        "patch_id": "require_admin_role"
+      },
+      {
+        "metadata": {},
+        "tool": "verify_patch"
+      },
+      {
+        "metadata": {},
+        "tool": "rollback",
+        "service": "worker",
+        "version": "previous"
+      },
+      {
+        "metadata": {},
+        "tool": "restart",
+        "service": "database"
+      },
+      {
+        "metadata": {},
+        "tool": "restart",
+        "service": "api-gateway"
+      },
+      {
+        "metadata": {},
+        "tool": "post_mortem",
+        "root_cause": "worker v2.4.1 memory leak deployed through broken admin auth",
+        "attack_vector": "broken access control on /admin/deploy let a non-admin deploy v2.4.1",
+        "fix_sequence": [
+          "require_admin_role patch",
+          "rollback worker",
+          "restart database",
+          "restart api-gateway"
+        ],
+        "prevention": "enforce RBAC, require signed deploys, and add approval gates"
+      }
+    ]
+  },
+  "metadata": {
+    "easy_001": {
+      "difficulty": "easy",
+      "best_reward": 2.5235000000000003,
+      "best_score": 1.0,
+      "success": true,
+      "trajectory_length": 6,
+      "memory_size": 2
+    }
+  },
+  "history": [
+    {
+      "step": 1,
+      "avg_reward": 2.5,
+      "best_reward": 2.5,
+      "best_score": 1.0,
+      "success_rate": 1.0
+    },
+    {
+      "step": 1,
+      "avg_reward": 2.5,
+      "best_reward": 2.5,
+      "best_score": 1.0,
+      "success_rate": 1.0
+    },
+    {
+      "step": 1,
+      "avg_reward": 2.5,
+      "best_reward": 2.5,
+      "best_score": 1.0,
+      "success_rate": 1.0
+    },
+    {
+      "step": 1,
+      "avg_reward": 2.5,
+      "best_reward": 2.5,
+      "best_score": 1.0,
+      "success_rate": 1.0
+    },
+    {
+      "step": 1,
+      "avg_reward": 2.5235000000000003,
+      "best_reward": 2.5235000000000003,
+      "best_score": 1.0,
+      "success_rate": 1.0
+    }
+  ],
+  "provider": "heuristic",
+  "model": "qwen2.5:7b",
+  "ollama_host": "http://127.0.0.1:11434"
+}

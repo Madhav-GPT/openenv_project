@@ -1,0 +1,140 @@
+{
+  "easy_001": [
+    {
+      "scenario_id": "easy_001",
+      "difficulty": "easy",
+      "total_reward": 2.5235000000000003,
+      "final_score": 1.0,
+      "success": true,
+      "steps": [
+        {
+          "tick": 1,
+          "observation_summary": "tick=0/15 | phase=Phase 1: Infrastructure Triage | unhealthy=[api-gateway,database] | alerts=2",
+          "action": {
+            "tool": "get_logs",
+            "service": "database"
+          },
+          "reward": 0.30000000000000004
+        },
+        {
+          "tick": 2,
+          "observation_summary": "tick=1/15 | phase=Phase 2: Security Sub-Quest ACTIVE | unhealthy=[api-gateway,database] | alerts=2 | sec_unlocked",
+          "action": {
+            "tool": "classify_vuln",
+            "vulnerability_type": "sql_injection"
+          },
+          "reward": 0.05
+        },
+        {
+          "tick": 3,
+          "observation_summary": "tick=2/15 | phase=Phase 2: Security Sub-Quest ACTIVE | unhealthy=[api-gateway,database] | alerts=2 | sec_unlocked",
+          "action": {
+            "tool": "apply_patch",
+            "patch_id": "parameterized_query"
+          },
+          "reward": 0.09999999999999999
+        },
+        {
+          "tick": 4,
+          "observation_summary": "tick=3/15 | phase=Phase 2: Security Sub-Quest ACTIVE | unhealthy=[api-gateway,database] | alerts=2 | sec_unlocked",
+          "action": {
+            "tool": "verify_patch"
+          },
+          "reward": 0.2
+        },
+        {
+          "tick": 5,
+          "observation_summary": "tick=4/15 | phase=Phase 3: Submit Post-Mortem | unhealthy=[api-gateway,database] | alerts=2 | sec_unlocked | sec_complete",
+          "action": {
+            "tool": "restart",
+            "service": "database"
+          },
+          "reward": 1.7
+        },
+        {
+          "tick": 5,
+          "observation_summary": "tick=5/15 | phase=Phase 3: Submit Post-Mortem | all_healthy | sec_unlocked | sec_complete",
+          "action": {
+            "tool": "post_mortem",
+            "root_cause": "database OOM caused by SQL injection dropping the users table",
+            "attack_vector": "sql injection in the login handler via string concatenation",
+            "fix_sequence": [
+              "parameterized query patch",
+              "database restart"
+            ],
+            "prevention": "use parameterized queries and add WAF coverage"
+          },
+          "reward": 0.1735
+        }
+      ]
+    },
+    {
+      "scenario_id": "easy_001",
+      "difficulty": "easy",
+      "total_reward": 2.5235000000000003,
+      "final_score": 1.0,
+      "success": true,
+      "steps": [
+        {
+          "tick": 1,
+          "observation_summary": "tick=0/15 | phase=Phase 1: Infrastructure Triage | unhealthy=[api-gateway,database] | alerts=2",
+          "action": {
+            "tool": "get_logs",
+            "service": "database"
+          },
+          "reward": 0.30000000000000004
+        },
+        {
+          "tick": 2,
+          "observation_summary": "tick=1/15 | phase=Phase 2: Security Sub-Quest ACTIVE | unhealthy=[api-gateway,database] | alerts=2 | sec_unlocked",
+          "action": {
+            "tool": "classify_vuln",
+            "vulnerability_type": "sql_injection"
+          },
+          "reward": 0.05
+        },
+        {
+          "tick": 3,
+          "observation_summary": "tick=2/15 | phase=Phase 2: Security Sub-Quest ACTIVE | unhealthy=[api-gateway,database] | alerts=2 | sec_unlocked",
+          "action": {
+            "tool": "apply_patch",
+            "patch_id": "parameterized_query"
+          },
+          "reward": 0.09999999999999999
+        },
+        {
+          "tick": 4,
+          "observation_summary": "tick=3/15 | phase=Phase 2: Security Sub-Quest ACTIVE | unhealthy=[api-gateway,database] | alerts=2 | sec_unlocked",
+          "action": {
+            "tool": "verify_patch"
+          },
+          "reward": 0.2
+        },
+        {
+          "tick": 5,
+          "observation_summary": "tick=4/15 | phase=Phase 3: Submit Post-Mortem | unhealthy=[api-gateway,database] | alerts=2 | sec_unlocked | sec_complete",
+          "action": {
+            "tool": "restart",
+            "service": "database"
+          },
+          "reward": 1.7
+        },
+        {
+          "tick": 5,
+          "observation_summary": "tick=5/15 | phase=Phase 3: Submit Post-Mortem | all_healthy | sec_unlocked | sec_complete",
+          "action": {
+            "tool": "post_mortem",
+            "root_cause": "database OOM caused by SQL injection dropping the users table",
+            "attack_vector": "sql injection in the login handler via string concatenation",
+            "fix_sequence": [
+              "parameterized query patch",
+              "database restart"
+            ],
+            "prevention": "use parameterized queries and add WAF coverage"
+          },
+          "reward": 0.1735
+        }
+      ]
+    }
+  ]
+}
